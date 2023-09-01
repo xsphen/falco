@@ -33,12 +33,12 @@ public:
 	virtual ~server() = default;
 
 	void init(
-		std::string server_addr,
+		const std::string& server_addr,
 		int threadiness,
-		std::string private_key,
-		std::string cert_chain,
-		std::string root_certs,
-		std::string log_level
+		const std::string& private_key,
+		const std::string& cert_chain,
+		const std::string& root_certs,
+		const std::string& log_level
 	);
 	void thread_process(int thread_index);
 	void run();
@@ -56,7 +56,6 @@ private:
 	std::string m_cert_chain;
 	std::string m_root_certs;
 
-	std::unique_ptr<::grpc::Server> m_server;
 	std::vector<std::thread> m_threads;
 	::grpc::ServerBuilder m_server_builder;
 	void init_mtls_server_builder();

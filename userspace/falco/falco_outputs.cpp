@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-#ifndef MINIMAL_BUILD
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(MINIMAL_BUILD)
 #include <google/protobuf/util/time_util.h>
 #endif
 
@@ -30,14 +30,12 @@ limitations under the License.
 #include "outputs_program.h"
 #include "outputs_stdout.h"
 #include "outputs_syslog.h"
-#ifndef MINIMAL_BUILD
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(MINIMAL_BUILD)
 #include "outputs_http.h"
 #include "outputs_grpc.h"
 #endif
 
 #include "banned.h" // This raises a compilation error when certain functions are used
-
-using namespace std;
 
 static const char* s_internal_source = "internal";
 
@@ -50,7 +48,7 @@ falco_outputs::falco_outputs(
 	uint32_t timeout,
 	bool buffered,
 	bool time_format_iso_8601,
-	std::string hostname)
+	const std::string& hostname)
 {
 	m_formats.reset(new falco_formats(engine, json_include_output_property, json_include_tags_property));
 
@@ -66,13 +64,16 @@ falco_outputs::falco_outputs(
 	{
 		add_output(output);
 	}
-
+#ifndef __EMSCRIPTEN__
 	m_worker_thread = std::thread(&falco_outputs::worker, this);
+#endif
 }
 
 falco_outputs::~falco_outputs()
 {
+#ifndef __EMSCRIPTEN__
 	this->stop_worker();
+#endif
 	for(auto o : m_outputs)
 	{
 		delete o;
@@ -100,7 +101,7 @@ void falco_outputs::add_output(falco::outputs::config oc)
 	{
 		oo = new falco::outputs::output_syslog();
 	}
-#ifndef MINIMAL_BUILD
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(MINIMAL_BUILD)
 	else if(oc.name == "http")
 	{
 		oo = new falco::outputs::output_http();
@@ -115,12 +116,20 @@ void falco_outputs::add_output(falco::outputs::config oc)
 		throw falco_exception("Output not supported: " + oc.name);
 	}
 
-	oo->init(oc, m_buffered, m_hostname, m_json_output);
-	m_outputs.push_back(oo);
+	std::string init_err;
+	if (oo->init(oc, m_buffered, m_hostname, m_json_output, init_err))
+	{
+		m_outputs.push_back(oo);
+	}
+	else
+	{
+		falco_logger::log(LOG_ERR, "Failed to init output: " + init_err);
+		delete(oo);
+	}
 }
 
-void falco_outputs::handle_event(gen_event *evt, string &rule, string &source,
-				 falco_common::priority_type priority, string &format, std::set<std::string> &tags)
+void falco_outputs::handle_event(gen_event *evt, std::string &rule, std::string &source,
+				 falco_common::priority_type priority, std::string &format, std::set<std::string> &tags)
 {
 	falco_outputs::ctrl_msg cmsg = {};
 	cmsg.ts = evt->get_ts();
@@ -128,7 +137,7 @@ void falco_outputs::handle_event(gen_event *evt, string &rule, string &source,
 	cmsg.source = source;
 	cmsg.rule = rule;
 
-	string sformat;
+	std::string sformat;
 	if(m_time_format_iso_8601)
 	{
 		sformat = "*%evt.time.iso8601: ";
@@ -163,8 +172,13 @@ void falco_outputs::handle_msg(uint64_t ts,
 			       falco_common::priority_type priority,
 			       std::string &msg,
 			       std::string &rule,
-			       std::map<std::string, std::string> &output_fields)
+			       nlohmann::json &output_fields)
 {
+	if (!output_fields.is_object())
+	{
+		throw falco_exception("falco_outputs: output fields must be key-value maps");
+	}
+
 	falco_outputs::ctrl_msg cmsg = {};
 	cmsg.ts = ts;
 	cmsg.priority = priority;
@@ -180,7 +194,7 @@ void falco_outputs::handle_msg(uint64_t ts,
 		time_t evttime = ts / 1000000000;
 		char time_sec[20]; // sizeof "YYYY-MM-DDTHH:MM:SS"
 		char time_ns[12];  // sizeof ".sssssssssZ"
-		string iso8601evttime;
+		std::string iso8601evttime;
 
 		strftime(time_sec, sizeof(time_sec), "%FT%T", gmtime(&evttime));
 		snprintf(time_ns, sizeof(time_ns), ".%09luZ", ts % 1000000000);
@@ -193,6 +207,7 @@ void falco_outputs::handle_msg(uint64_t ts,
 		jmsg["time"] = iso8601evttime;
 		jmsg["output_fields"] = output_fields;
 		jmsg["hostname"] = m_hostname;
+		jmsg["source"] = s_internal_source;
 
 		cmsg.msg = jmsg.dump();
 	}
@@ -203,7 +218,7 @@ void falco_outputs::handle_msg(uint64_t ts,
 
 		sinsp_utils::ts_to_string(ts, &timestr, false, true);
 		cmsg.msg = timestr + ": " + falco_common::format_priority(priority) + " " + msg + " (";
-		for(auto &pair : output_fields)
+		for(auto &pair : output_fields.items())
 		{
 			if(first)
 			{
@@ -213,7 +228,11 @@ void falco_outputs::handle_msg(uint64_t ts,
 			{
 				cmsg.msg += " ";
 			}
-			cmsg.msg += pair.first + "=" + pair.second;
+			if (!pair.value().is_primitive())
+			{
+				throw falco_exception("falco_outputs: output fields must be key-value maps");
+			}
+			cmsg.msg += pair.key() + "=" + pair.value().dump();
 		}
 		cmsg.msg += ")";
 	}
@@ -237,7 +256,9 @@ void falco_outputs::stop_worker()
 	watchdog<void *> wd;
 	wd.start([&](void *) -> void {
 		falco_logger::log(LOG_NOTICE, "output channels still blocked, discarding all remaining notifications\n");
+#ifndef __EMSCRIPTEN__
 		m_queue.clear();
+#endif
 		this->push_ctrl(falco_outputs::ctrl_msg_type::CTRL_MSG_STOP);
 	});
 	wd.set_timeout(m_timeout, nullptr);
@@ -258,11 +279,18 @@ inline void falco_outputs::push_ctrl(ctrl_msg_type cmt)
 
 inline void falco_outputs::push(const ctrl_msg& cmsg)
 {
+#ifndef __EMSCRIPTEN__
 	if (!m_queue.try_push(cmsg))
 	{
 		fprintf(stderr, "Fatal error: Output queue reached maximum capacity. Exiting.\n");
 		exit(EXIT_FAILURE);
 	}
+#else
+	for (auto o : m_outputs)
+	{
+		process_msg(o, cmsg);
+	}
+#endif
 }
 
 // todo(leogr,leodido): this function is not supposed to throw exceptions, and with "noexcept",
@@ -271,7 +299,7 @@ inline void falco_outputs::push(const ctrl_msg& cmsg)
 void falco_outputs::worker() noexcept
 {
 	watchdog<std::string> wd;
-	wd.start([&](std::string payload) -> void {
+	wd.start([&](const std::string& payload) -> void {
 		falco_logger::log(LOG_CRIT, "\"" + payload + "\" output timeout, all output channels are blocked\n");
 	});
 
@@ -281,34 +309,41 @@ void falco_outputs::worker() noexcept
 	do
 	{
 		// Block until a message becomes available.
+#ifndef __EMSCRIPTEN__
 		m_queue.pop(cmsg);
+#endif
 
-		for(const auto o : m_outputs)
+		for(auto o : m_outputs)
 		{
 			wd.set_timeout(timeout, o->get_name());
 			try
 			{
-				switch(cmsg.type)
-				{
-					case ctrl_msg_type::CTRL_MSG_OUTPUT:
-						o->output(&cmsg);
-						break;
-					case ctrl_msg_type::CTRL_MSG_CLEANUP:
-					case ctrl_msg_type::CTRL_MSG_STOP:
-						o->cleanup();
-						break;
-					case ctrl_msg_type::CTRL_MSG_REOPEN:
-						o->reopen();
-						break;
-					default:
-						falco_logger::log(LOG_DEBUG, "Outputs worker received an unknown message type\n");
-				}
+				process_msg(o, cmsg);
 			}
-			catch(const exception &e)
+			catch(const std::exception &e)
 			{
-				falco_logger::log(LOG_ERR, o->get_name() + ": " + string(e.what()) + "\n");
+				falco_logger::log(LOG_ERR, o->get_name() + ": " + std::string(e.what()) + "\n");
 			}
 		}
 		wd.cancel_timeout();
 	} while(cmsg.type != ctrl_msg_type::CTRL_MSG_STOP);
+}
+
+inline void falco_outputs::process_msg(falco::outputs::abstract_output* o, const ctrl_msg& cmsg)
+{
+	switch(cmsg.type)
+	{
+		case ctrl_msg_type::CTRL_MSG_OUTPUT:
+			o->output(&cmsg);
+			break;
+		case ctrl_msg_type::CTRL_MSG_CLEANUP:
+		case ctrl_msg_type::CTRL_MSG_STOP:
+			o->cleanup();
+			break;
+		case ctrl_msg_type::CTRL_MSG_REOPEN:
+			o->reopen();
+			break;
+		default:
+			falco_logger::log(LOG_DEBUG, "Outputs worker received an unknown message type\n");
+	}
 }

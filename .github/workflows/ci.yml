@@ -1,170 +1,117 @@
 name: CI Build
 on:
   pull_request:
-    branches: [master]
-  push:
-    branches: [master]
+    branches:
+      - master
+      - release/*
   workflow_dispatch:
 
+# Checks if any concurrent jobs under the same pull request or branch are being executed
+# NOTE: this will cancel every workflow that is being ran against a PR as group is just the github ref (without the workflow name)
+concurrency:
+  group: ${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true  
+
 jobs:
-  build-minimal:
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
+  fetch-version:
+    uses: ./.github/workflows/reusable_fetch_version.yaml
 
-      - name: Update base image
-        run: sudo apt update -y
+  build-dev-packages:
+    needs: [fetch-version]
+    uses: ./.github/workflows/reusable_build_packages.yaml
+    with:
+      arch: x86_64
+      version: ${{ needs.fetch-version.outputs.version }}
 
-      - name: Install build dependencies
-        run: sudo DEBIAN_FRONTEND=noninteractive apt install libjq-dev libyaml-cpp-dev libelf-dev cmake build-essential git -y
+  test-dev-packages:
+    needs: [fetch-version, build-dev-packages]
+    uses: ./.github/workflows/reusable_test_packages.yaml
+    strategy:
+      fail-fast: false
+      matrix:
+        static: ["static", ""]
+    with:
+      arch: x86_64
+      static: ${{ matrix.static != '' && true || false }}
+      version: ${{ needs.fetch-version.outputs.version }}
 
-      - name: Prepare project
-        run: |
-          mkdir build-minimal
-          pushd build-minimal
-          cmake -DMINIMAL_BUILD=On -DBUILD_BPF=Off -DBUILD_DRIVER=Off -DCMAKE_BUILD_TYPE=Release ..
-          popd
-
-      - name: Build
-        run: |
-          pushd build-minimal
-          make -j4 all
-          popd
-
-      - name: Run unit tests
-        run: |
-          pushd build-minimal
-          make tests
-          popd
-
-  build-ubuntu-focal:
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-
-      - name: Update base image
-        run: sudo apt update -y
-
-      - name: Install build dependencies
-        run: sudo DEBIAN_FRONTEND=noninteractive apt install libssl-dev libyaml-dev libc-ares-dev libprotobuf-dev protobuf-compiler libjq-dev libyaml-cpp-dev libgrpc++-dev protobuf-compiler-grpc rpm libelf-dev cmake build-essential libcurl4-openssl-dev linux-headers-$(uname -r) clang llvm git -y
-
-      - name: Prepare project
-        run: |
-          mkdir build
-          pushd build
-          cmake -DBUILD_BPF=On ..
-          popd
-
-      - name: Build
-        run: |
-          pushd build
-          KERNELDIR=/lib/modules/$(uname -r)/build make -j4 all
-          popd
-
-      - name: Run unit tests
-        run: |
-          pushd build
-          make tests
-          popd
-
-  build-ubuntu-focal-debug:
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-
-      - name: Update base image
-        run: sudo apt update -y
-
-      - name: Install build dependencies
-        run: sudo DEBIAN_FRONTEND=noninteractive apt install libssl-dev libyaml-dev libc-ares-dev libprotobuf-dev protobuf-compiler libjq-dev libyaml-cpp-dev libgrpc++-dev protobuf-compiler-grpc rpm libelf-dev cmake build-essential libcurl4-openssl-dev linux-headers-$(uname -r) clang llvm git -y
-
-      - name: Prepare project
-        run: |
-          mkdir build
-          pushd build
-          cmake -DCMAKE_BUILD_TYPE=debug -DBUILD_BPF=On ..
-          popd
-
-      - name: Build
-        run: |
-          pushd build
-          KERNELDIR=/lib/modules/$(uname -r)/build make -j4 all
-          popd
-
-      - name: Run unit tests
-        run: |
-          pushd build
-          make tests
-          popd
-
-  build-ubuntu-bionic:
-    runs-on: ubuntu-18.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-
-      - name: Update base image
-        run: sudo apt update -y
-
-      - name: Install build dependencies
-        run: sudo DEBIAN_FRONTEND=noninteractive apt install cmake build-essential clang llvm git linux-headers-$(uname -r) pkg-config autoconf libtool libelf-dev -y
-
-      - name: Prepare project
-        run: |
-          mkdir build
-          pushd build
-          cmake -DBUILD_BPF=On -DUSE_BUNDLED_DEPS=On ..
-          popd
-
-      - name: Build
-        run: |
-          pushd build
-          KERNELDIR=/lib/modules/$(uname -r)/build make -j4 all
-          popd
-
-      - name: Run unit tests
-        run: |
-          pushd build
-          make tests
-          popd
-
-  build-centos7-debug:
-    runs-on: ubuntu-latest
-    container:
-      image: falcosecurity/falco-builder:latest
-      env:
-        BUILD_TYPE: "debug"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-          path: falco
-
-      - name: Link falco repo to /source/falco
-        run: |
-          mkdir -p /source
-          ln -s "$GITHUB_WORKSPACE/falco" /source/falco
+  build-dev-minimal:
+    uses: ./.github/workflows/reusable_build_dev.yaml
+    with:
+      arch: x86_64
+      git_ref: ${{ github.event.pull_request.head.sha }}
+      minimal: true
+      build_type: Debug
   
-      - name: Prepare project
-        run: /usr/bin/entrypoint cmake
+  # builds using system deps, checking out the PR's code
+  # note: this also runs a command that generates an output of form: "<engine_version> <some_hash>",
+  # of which <some_hash> is computed by hashing in order the following:
+  # - Driver schema version supported by the built-in falcosecurity/libs
+  # - The supported event types usable in Falco rules (evt.type=xxx)
+  # - The supported rules fields with their name, type, and description
+  build-dev:
+    uses: ./.github/workflows/reusable_build_dev.yaml
+    with:
+      arch: x86_64
+      git_ref: ${{ github.event.pull_request.head.sha }}
+      minimal: false
+      build_type: Debug
+      cmd: "echo $(build/userspace/falco/falco -c ./falco.yaml --version | grep 'Engine:' | awk '{print $2}') $(echo $(build/userspace/falco/falco -c ./falco.yaml --version | grep 'Schema version:' | awk '{print $3}') $(build/userspace/falco/falco -c ./falco.yaml --list --markdown | grep '^`' | sort) $(build/userspace/falco/falco -c ./falco.yaml --list-syscall-events | sort) | sha256sum)"
 
-      - name: Build
-        run: /usr/bin/entrypoint all
+  # checks the falco engine checksum for consistency
+  check-engine-checksum:
+    runs-on: ubuntu-latest
+    needs: [build-dev]
+    steps:    
+      - name: Checkout PR head ref
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Run unit tests
-        run: /usr/bin/entrypoint tests
+      - name: Check Engine checksum
+        run: |
+          prev_hash=$(grep CHECKSUM "./userspace/engine/falco_engine_version.h" | awk '{print $3}' | sed -e 's/"//g')
+          cur_hash=$(echo "${{ needs.build-dev.outputs.cmdout }}" | cut -d ' ' -f 2)
+          
+          echo "encoded checksum: $prev_hash"
+          echo "current checksum: $cur_hash"
+          if [ $prev_hash != $cur_hash ]; then
+            echo "current engine checksum differs from the one encoded in userspace/engine/falco_engine_version.h"
+            exit 1
+          else
+            echo "current and encoded engine checksum are matching"
+          fi
 
-      - name: Build packages
-        run: /usr/bin/entrypoint package
+  # checks the falco engine version and enforce bumping when necessary
+  check-engine-version:
+    runs-on: ubuntu-latest
+    needs: [build-dev]
+    steps:    
+      - name: Checkout base ref
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          ref: ${{ github.base_ref }}
+
+      - name: Check Engine version
+        run: |
+          base_hash=$(grep CHECKSUM "./userspace/engine/falco_engine_version.h" | awk '{print $3}' | sed -e 's/"//g')
+          base_engine_ver=$(grep ENGINE_VERSION "./userspace/engine/falco_engine_version.h" | awk '{print $3}' | sed -e 's/(//g' -e 's/)//g')
+
+          cur_hash=$(echo "${{ needs.build-dev.outputs.cmdout }}" | cut -d ' ' -f 2)
+          cur_engine_ver=$(echo "${{ needs.build-dev.outputs.cmdout }}" | cut -d ' ' -f 1)
+
+          echo "baseref checksum: $base_hash"
+          echo "baseref engine version: $base_engine_ver"
+          echo "headref checksum: $cur_hash"
+          echo "headref engine version: $cur_engine_ver"
+          if [ "$base_hash" != "$cur_hash" ]; then
+              echo "engine checksum for baseref and headref differ"
+              if [ "$base_engine_ver" == "$cur_engine_ver" ]; then
+                  echo "engine version must be bumped"
+                  exit 1
+              else
+                  echo "engine version for baseref and headref differ too, so no bump is required"
+              fi
+          fi

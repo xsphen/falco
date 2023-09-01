@@ -14,3 +14,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+
+set -e
+
+if [ -d /run/systemd/system ] && [ $1 -eq 0 ]; then
+        echo "[POST-REMOVE] Disable all Falco services:"
+        systemctl --system disable 'falco-kmod.service'|| true
+        systemctl --system disable 'falco-bpf.service' || true
+        systemctl --system disable 'falco-modern-bpf.service' || true
+        systemctl --system disable 'falco-custom.service' || true
+        systemctl --system disable 'falcoctl-artifact-follow.service' || true
+
+        echo "[POST-REMOVE] Trigger deamon-reload:"
+        systemctl --system daemon-reload || true
+fi

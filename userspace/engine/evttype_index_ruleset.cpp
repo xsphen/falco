@@ -15,12 +15,9 @@ limitations under the License.
 */
 
 #include "evttype_index_ruleset.h"
-#include "filter_evttype_resolver.h"
 #include "banned.h" // This raises a compilation error when certain functions are used
 
 #include <algorithm>
-
-using namespace std;
 
 evttype_index_ruleset::evttype_index_ruleset(
 	std::shared_ptr<gen_event_filter_factory> f): m_filter_factory(f)
@@ -68,14 +65,14 @@ void evttype_index_ruleset::ruleset_filters::remove_wrapper_from_list(filter_wra
 
 void evttype_index_ruleset::ruleset_filters::add_filter(std::shared_ptr<filter_wrapper> wrap)
 {
-	if(wrap->evttypes.empty())
+	if(wrap->event_codes.empty())
 	{
 		// Should run for all event types
 		add_wrapper_to_list(m_filter_all_event_types, wrap);
 	}
 	else
 	{
-		for(auto &etype : wrap->evttypes)
+		for(auto &etype : wrap->event_codes)
 		{
 			if(m_filter_by_event_type.size() <= etype)
 			{
@@ -91,13 +88,13 @@ void evttype_index_ruleset::ruleset_filters::add_filter(std::shared_ptr<filter_w
 
 void evttype_index_ruleset::ruleset_filters::remove_filter(std::shared_ptr<filter_wrapper> wrap)
 {
-	if(wrap->evttypes.empty())
+	if(wrap->event_codes.empty())
 	{
 		remove_wrapper_from_list(m_filter_all_event_types, wrap);
 	}
 	else
 	{
-		for(auto &etype : wrap->evttypes)
+		for(auto &etype : wrap->event_codes)
 		{
 			if( etype < m_filter_by_event_type.size() )
 			{
@@ -141,41 +138,86 @@ bool evttype_index_ruleset::ruleset_filters::run(gen_event *evt, falco_rule& mat
 	return false;
 }
 
-void evttype_index_ruleset::ruleset_filters::evttypes_for_ruleset(std::set<uint16_t> &evttypes)
+bool evttype_index_ruleset::ruleset_filters::run(gen_event *evt, std::vector<falco_rule>& matches)
 {
-	evttypes.clear();
+	bool match_found = false;
 
+	if(evt->get_type() < m_filter_by_event_type.size())
+	{
+		for(auto &wrap : m_filter_by_event_type[evt->get_type()])
+		{
+			if(wrap->filter->run(evt))
+			{
+				matches.push_back(wrap->rule);
+				match_found = true;
+			}
+		}
+	}
+
+	if(match_found)
+	{
+		return true;
+	}
+
+	// Finally, try filters that are not specific to an event type.
+	for(auto &wrap : m_filter_all_event_types)
+	{
+		if(wrap->filter->run(evt))
+		{
+			matches.push_back(wrap->rule);
+			match_found = true;
+		}
+	}
+
+	return match_found;
+}
+
+libsinsp::events::set<ppm_sc_code> evttype_index_ruleset::ruleset_filters::sc_codes()
+{
+	libsinsp::events::set<ppm_sc_code> res;
 	for(auto &wrap : m_filters)
 	{
-		evttypes.insert(wrap->evttypes.begin(), wrap->evttypes.end());
+		res.insert(wrap->sc_codes.begin(), wrap->sc_codes.end());
 	}
+	return res;
+}
+
+libsinsp::events::set<ppm_event_code> evttype_index_ruleset::ruleset_filters::event_codes()
+{
+	libsinsp::events::set<ppm_event_code> res;
+	for(auto &wrap : m_filters)
+	{
+		res.insert(wrap->event_codes.begin(), wrap->event_codes.end());
+	}
+	return res;
 }
 
 void evttype_index_ruleset::add(
 		const falco_rule& rule,
+		std::shared_ptr<gen_event_filter> filter,
 		std::shared_ptr<libsinsp::filter::ast::expr> condition)
 {
 	try
 	{
-		sinsp_filter_compiler compiler(m_filter_factory, condition.get());
-		shared_ptr<gen_event_filter> filter(compiler.compile());
 		std::shared_ptr<filter_wrapper> wrap(new filter_wrapper());
 		wrap->rule = rule;
 		wrap->filter = filter;
 		if(rule.source == falco_common::syscall_source)
 		{
-			filter_evttype_resolver resolver;
-			resolver.evttypes(condition, wrap->evttypes);
+			wrap->sc_codes = libsinsp::filter::ast::ppm_sc_codes(condition.get());
+			wrap->event_codes = libsinsp::filter::ast::ppm_event_codes(condition.get());
 		}
 		else
 		{
-			wrap->evttypes = { ppm_event_type::PPME_PLUGINEVENT_E };
+			wrap->sc_codes = { };
+			wrap->event_codes = { ppm_event_code::PPME_PLUGINEVENT_E };
 		}
+		wrap->event_codes.insert(ppm_event_code::PPME_ASYNCEVENT_E);
 		m_filters.insert(wrap);
 	}
 	catch (const sinsp_exception& e)
 	{
-		throw falco_exception(string(e.what()));
+		throw falco_exception(std::string(e.what()));
 	}
 }
 
@@ -194,17 +236,17 @@ void evttype_index_ruleset::clear()
 	m_filters.clear();
 }
 
-void evttype_index_ruleset::enable(const string &substring, bool match_exact, uint16_t ruleset_id)
+void evttype_index_ruleset::enable(const std::string &substring, bool match_exact, uint16_t ruleset_id)
 {
 	enable_disable(substring, match_exact, true, ruleset_id);
 }
 
-void evttype_index_ruleset::disable(const string &substring, bool match_exact, uint16_t ruleset_id)
+void evttype_index_ruleset::disable(const std::string &substring, bool match_exact, uint16_t ruleset_id)
 {
 	enable_disable(substring, match_exact, false, ruleset_id);
 }
 
-void evttype_index_ruleset::enable_disable(const string &substring, bool match_exact, bool enabled, uint16_t ruleset_id)
+void evttype_index_ruleset::enable_disable(const std::string &substring, bool match_exact, bool enabled, uint16_t ruleset_id)
 {
 	while(m_rulesets.size() < (size_t)ruleset_id + 1)
 	{
@@ -224,7 +266,7 @@ void evttype_index_ruleset::enable_disable(const string &substring, bool match_e
 		}
 		else
 		{
-			matches = (substring == "" || (wrap->rule.name.find(substring) != string::npos));
+			matches = (substring == "" || (wrap->rule.name.find(substring) != std::string::npos));
 		}
 
 		if(matches)
@@ -241,17 +283,17 @@ void evttype_index_ruleset::enable_disable(const string &substring, bool match_e
 	}
 }
 
-void evttype_index_ruleset::enable_tags(const set<string> &tags, uint16_t ruleset_id)
+void evttype_index_ruleset::enable_tags(const std::set<std::string> &tags, uint16_t ruleset_id)
 {
 	enable_disable_tags(tags, true, ruleset_id);
 }
 
-void evttype_index_ruleset::disable_tags(const set<string> &tags, uint16_t ruleset_id)
+void evttype_index_ruleset::disable_tags(const std::set<std::string> &tags, uint16_t ruleset_id)
 {
 	enable_disable_tags(tags, false, ruleset_id);
 }
 
-void evttype_index_ruleset::enable_disable_tags(const set<string> &tags, bool enabled, uint16_t ruleset_id)
+void evttype_index_ruleset::enable_disable_tags(const std::set<std::string> &tags, bool enabled, uint16_t ruleset_id)
 {
 	while(m_rulesets.size() < (size_t)ruleset_id + 1)
 	{
@@ -260,7 +302,7 @@ void evttype_index_ruleset::enable_disable_tags(const set<string> &tags, bool en
 
 	for(const auto &wrap : m_filters)
 	{
-		std::set<string> intersect;
+		std::set<std::string> intersect;
 
 		set_intersection(tags.begin(), tags.end(),
 				 wrap->rule.tags.begin(), wrap->rule.tags.end(),
@@ -300,12 +342,39 @@ bool evttype_index_ruleset::run(gen_event *evt, falco_rule& match, uint16_t rule
 	return m_rulesets[ruleset_id]->run(evt, match);
 }
 
-void evttype_index_ruleset::enabled_evttypes(set<uint16_t> &evttypes, uint16_t ruleset_id)
+bool evttype_index_ruleset::run(gen_event *evt, std::vector<falco_rule>& matches, uint16_t ruleset_id)
 {
 	if(m_rulesets.size() < (size_t)ruleset_id + 1)
 	{
-		return;
+		return false;
 	}
 
-	return m_rulesets[ruleset_id]->evttypes_for_ruleset(evttypes);
+	return m_rulesets[ruleset_id]->run(evt, matches);
+}
+
+void evttype_index_ruleset::enabled_evttypes(std::set<uint16_t> &evttypes, uint16_t ruleset_id)
+{
+	evttypes.clear();
+	for (const auto& e : enabled_event_codes(ruleset_id))
+	{
+		evttypes.insert((uint16_t) e);
+	}
+}
+
+libsinsp::events::set<ppm_sc_code> evttype_index_ruleset::enabled_sc_codes(uint16_t ruleset)
+{
+	if(m_rulesets.size() < (size_t)ruleset + 1)
+	{
+		return {};
+	}
+	return m_rulesets[ruleset]->sc_codes();
+}
+	
+libsinsp::events::set<ppm_event_code> evttype_index_ruleset::enabled_event_codes(uint16_t ruleset)
+{
+	if(m_rulesets.size() < (size_t)ruleset + 1)
+	{
+		return {};
+	}
+	return m_rulesets[ruleset]->event_codes();
 }

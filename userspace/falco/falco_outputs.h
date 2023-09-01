@@ -24,7 +24,9 @@ limitations under the License.
 #include "falco_engine.h"
 #include "outputs.h"
 #include "formats.h"
+#ifndef __EMSCRIPTEN__
 #include "tbb/concurrent_queue.h"
+#endif
 
 /*!
 	\brief This class acts as the primary interface between a program and the
@@ -47,7 +49,7 @@ public:
 		uint32_t timeout,
 		bool buffered,
 		bool time_format_iso_8601,
-		std::string hostname);
+		const std::string& hostname);
 
 	virtual ~falco_outputs();
 
@@ -66,7 +68,7 @@ public:
 			falco_common::priority_type priority,
 			std::string &msg,
 			std::string &rule,
-			std::map<std::string, std::string> &output_fields);
+			nlohmann::json &output_fields);
 
 	/*!
 		\brief Sends a cleanup message to all outputs.
@@ -105,9 +107,10 @@ private:
 		ctrl_msg_type type;
 	};
 
+#ifndef __EMSCRIPTEN__
 	typedef tbb::concurrent_bounded_queue<ctrl_msg> falco_outputs_cbq;
-
 	falco_outputs_cbq m_queue;
+#endif
 
 	std::thread m_worker_thread;
 	inline void push(const ctrl_msg& cmsg);
@@ -115,4 +118,5 @@ private:
 	void worker() noexcept;
 	void stop_worker();
 	void add_output(falco::outputs::config oc);
+	inline void process_msg(falco::outputs::abstract_output* o, const ctrl_msg& cmsg);
 };

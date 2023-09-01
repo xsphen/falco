@@ -52,7 +52,7 @@ struct falco_exception : std::exception
 
 namespace falco_common
 {
-	const string syscall_source = "syscall";
+	const std::string syscall_source = sinsp_syscall_event_source_name;
 
 	// Same as numbers/indices into the above vector
 	enum priority_type
@@ -71,4 +71,12 @@ namespace falco_common
 	priority_type parse_priority(std::string v);
 	bool format_priority(priority_type v, std::string& out, bool shortfmt=false);
 	std::string format_priority(priority_type v, bool shortfmt=false);
+
+	enum rule_matching
+	{
+		FIRST = 0,
+		ALL = 1
+	};
+
+	bool parse_rule_matching(std::string v, rule_matching& out);
 };

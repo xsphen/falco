@@ -15,17 +15,93 @@
 # limitations under the License.
 #
 
-mod_version="@DRIVER_VERSION@"
-dkms add -m falco -v $mod_version --rpm_safe_upgrade
-if [ `uname -r | grep -c "BOOT"` -eq 0 ] && [ -e /lib/modules/`uname -r`/build/include ]; then
-	dkms build -m falco -v $mod_version
-	dkms install --force -m falco -v $mod_version
-elif [ `uname -r | grep -c "BOOT"` -gt 0 ]; then
-	echo -e ""
-	echo -e "Module build for the currently running kernel was skipped since you"
-	echo -e "are running a BOOT variant of the kernel."
-else
-	echo -e ""
-	echo -e "Module build for the currently running kernel was skipped since the"
-	echo -e "kernel source for this kernel does not seem to be installed."
+chosen_driver=
+
+# Every time we call this script we want to stat from a clean state.
+echo "[POST-INSTALL] Disable all possible enabled 'falco' service:"
+systemctl --system stop 'falco-kmod.service' || true
+systemctl --system stop 'falco-bpf.service' || true
+systemctl --system stop 'falco-modern-bpf.service' || true
+systemctl --system stop 'falco-custom.service' || true
+systemctl --system stop 'falcoctl-artifact-follow.service' || true
+systemctl --system disable 'falco-kmod.service' || true
+systemctl --system disable 'falco-bpf.service' || true
+systemctl --system disable 'falco-modern-bpf.service' || true
+systemctl --system disable 'falco-custom.service' || true
+systemctl --system disable 'falcoctl-artifact-follow.service' || true
+
+# unmask falcoctl if it was masked
+systemctl --system unmask falcoctl-artifact-follow.service || true
+
+if [ $1 -ge 1 ]; then
+        if [ -x /usr/bin/dialog ] && [ "${FALCO_FRONTEND}" != "noninteractive" ]; then
+            # If dialog is installed, create a dialog to let users choose the correct driver for them
+            CHOICE=$(dialog --clear --title "Falco drivers" --menu "Choose your preferred driver:" 12 55 4 \
+                    1 "Manual configuration (no unit is started)" \
+                    2 "Kmod" \
+                    3 "eBPF" \
+                    4 "Modern eBPF" \
+                    2>&1 >/dev/tty)
+            case $CHOICE in
+                2)
+                    chosen_driver="kmod"
+                    ;;
+                3)
+                    chosen_driver="bpf"
+                    ;;
+                4)
+                    chosen_driver="modern-bpf"
+                    ;;
+            esac
+            if [ -n "$chosen_driver" ]; then
+              CHOICE=$(dialog --clear --title "Falcoctl" --menu "Do you want to follow automatic ruleset updates?" 10 40 2 \
+                      1 "Yes" \
+                      2 "No" \
+                      2>&1 >/dev/tty)
+              case $CHOICE in
+                  2)
+                      # we don't want falcoctl enabled, we mask it
+                      systemctl --system mask falcoctl-artifact-follow.service || true
+                  ;;
+              esac
+            fi
+            clear
+        fi
+fi
+
+set -e
+
+echo "[POST-INSTALL] Trigger deamon-reload:"
+systemctl --system daemon-reload || true
+
+# If needed, try to load/compile the driver through falco-driver-loader
+case "$chosen_driver" in
+    "kmod")
+      # Only compile for kmod, in this way we use dkms
+      echo "[POST-INSTALL] Call 'falco-driver-loader --compile module':"
+      falco-driver-loader --compile module
+      ;;
+    "bpf")
+      echo "[POST-INSTALL] Call 'falco-driver-loader bpf':"
+      falco-driver-loader bpf
+      ;;
+esac
+
+# validate rpm macros by `rpm -qp --scripts <rpm>`
+# RPM scriptlets: https://docs.fedoraproject.org/en-US/packaging-guidelines/Scriptlets/#_systemd
+#                 https://docs.fedoraproject.org/en-US/packaging-guidelines/Scriptlets/#_syntax
+
+# systemd_post macro expands to
+# if postinst:
+#   `systemd-update-helper install-system-units <service>`
+%systemd_post "falco-$chosen_driver.service"
+
+# post install/upgrade mirrored from .deb
+if [ $1 -ge 1 ]; then
+        if [ -n "$chosen_driver" ]; then
+            echo "[POST-INSTALL] Enable 'falco-$chosen_driver.service':"
+            systemctl --system enable "falco-$chosen_driver.service" || true
+            echo "[POST-INSTALL] Start 'falco-$chosen_driver.service':"
+            systemctl --system start "falco-$chosen_driver.service" || true
+        fi
 fi

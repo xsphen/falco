@@ -50,11 +50,13 @@ public:
 		LOAD_UNKNOWN_SOURCE = 0,
 		LOAD_UNSAFE_NA_CHECK,
 		LOAD_NO_EVTTYPE,
-		LOAD_UNKNOWN_FIELD,
+		LOAD_UNKNOWN_FILTER,
 		LOAD_UNUSED_MACRO,
 		LOAD_UNUSED_LIST,
 		LOAD_UNKNOWN_ITEM
 	};
+
+	virtual ~load_result() = default;
 
 	// The warning code as a string
 	static const std::string& warning_code_str(warning_code ec);

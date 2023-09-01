@@ -69,7 +69,7 @@ static void gpr_log_dispatcher_func(gpr_log_func_args* args)
 		break;
 	}
 
-	string copy = "grpc: ";
+	std::string copy = "grpc: ";
 	copy.append(args->message);
 	copy.push_back('\n');
 	falco_logger::log(priority, std::move(copy));
@@ -128,12 +128,12 @@ void falco::grpc::server::thread_process(int thread_index)
 }
 
 void falco::grpc::server::init(
-	std::string server_addr,
+	const std::string& server_addr,
 	int threadiness,
-	std::string private_key,
-	std::string cert_chain,
-	std::string root_certs,
-	std::string log_level)
+	const std::string& private_key,
+	const std::string& cert_chain,
+	const std::string& root_certs,
+	const std::string& log_level)
 {
 	m_server_addr = server_addr;
 	m_threadiness = threadiness;
@@ -171,9 +171,9 @@ void falco::grpc::server::init(
 
 void falco::grpc::server::init_mtls_server_builder()
 {
-	string private_key;
-	string cert_chain;
-	string root_certs;
+	std::string private_key;
+	std::string cert_chain;
+	std::string root_certs;
 	falco::utils::readfile(m_cert_chain, cert_chain);
 	falco::utils::readfile(m_private_key, private_key);
 	falco::utils::readfile(m_root_certs, root_certs);
@@ -222,10 +222,7 @@ void falco::grpc::server::run()
 	}
 	// todo(leodido) > log "gRPC server running: threadiness=m_threads.size()"
 
-	while(server_impl::is_running())
-	{
-		std::this_thread::sleep_for(std::chrono::milliseconds(100));
-	}
+	m_server->Wait();
 	// todo(leodido) > log "stopping gRPC server"
 	stop();
 }
@@ -233,7 +230,6 @@ void falco::grpc::server::run()
 void falco::grpc::server::stop()
 {
 	falco_logger::log(LOG_INFO, "Shutting down gRPC server. Waiting until external connections are closed by clients\n");
-	m_server->Shutdown();
 	m_completion_queue->Shutdown();
 
 	falco_logger::log(LOG_INFO, "Waiting for the gRPC threads to complete\n");

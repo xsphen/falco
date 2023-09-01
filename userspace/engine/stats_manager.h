@@ -34,6 +34,10 @@ class stats_manager
 public:
 	stats_manager();
 	virtual ~stats_manager();
+	stats_manager(stats_manager&&) = default;
+	stats_manager& operator = (stats_manager&&) = default;
+	stats_manager(const stats_manager&) = default;
+	stats_manager& operator = (const stats_manager&) = default;
 
 	/*!
 		\brief Erases the internal state and statistics data
@@ -63,7 +67,7 @@ public:
 		std::string& out) const;
 
 private:
-	atomic<uint64_t> m_total;
-	std::vector<std::unique_ptr<atomic<uint64_t>>> m_by_priority;
-	std::vector<std::unique_ptr<atomic<uint64_t>>> m_by_rule_id;
+	std::atomic<uint64_t> m_total;
+	std::vector<std::unique_ptr<std::atomic<uint64_t>>> m_by_priority;
+	std::vector<std::unique_ptr<std::atomic<uint64_t>>> m_by_rule_id;
 };

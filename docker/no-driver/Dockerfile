@@ -6,7 +6,7 @@ ARG VERSION_BUCKET=bin
 ENV FALCO_VERSION=${FALCO_VERSION}
 ENV VERSION_BUCKET=${VERSION_BUCKET}
 
-RUN apt-get -y update && apt-get -y install gridsite-clients curl
+RUN apt-get -y update && apt-get -y install gridsite-clients curl ca-certificates
 
 WORKDIR /
 
@@ -23,9 +23,13 @@ RUN sed -e 's/time_format_iso_8601: false/time_format_iso_8601: true/' < /falco/
 FROM debian:11-slim
 
 LABEL maintainer="cncf-falco-dev@lists.cncf.io"
+LABEL org.opencontainers.image.source="https://github.com/falcosecurity/falco"
 
 LABEL usage="docker run -i -t --privileged -v /var/run/docker.sock:/host/var/run/docker.sock -v /dev:/host/dev -v /proc:/host/proc:ro --name NAME IMAGE"
 # NOTE: for the "least privileged" use case, please refer to the official documentation
+
+RUN apt-get -y update && apt-get -y install ca-certificates curl jq \
+    && apt clean -y && rm -rf /var/lib/apt/lists/*
 
 ENV HOST_ROOT /host
 ENV HOME /root

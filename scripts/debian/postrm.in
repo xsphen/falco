@@ -15,3 +15,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+
+# Based off what debhelper dh_systemd_enable/13.3.4 would have added
+# ref: https://www.debian.org/doc/manuals/debmake-doc/ch05.en.html#debhelper
+
+set -e
+
+if [ -d /run/systemd/system ] && [ "$1" = remove ]; then
+        echo "[POST-REMOVE] Disable all Falco services:"
+        systemctl --system disable 'falco-kmod.service' || true
+        systemctl --system disable 'falco-bpf.service' || true
+        systemctl --system disable 'falco-modern-bpf.service' || true
+        systemctl --system disable 'falco-custom.service' || true
+        systemctl --system disable 'falcoctl-artifact-follow.service' || true
+
+        echo "[POST-REMOVE] Trigger deamon-reload:"
+        systemctl --system daemon-reload || true
+fi

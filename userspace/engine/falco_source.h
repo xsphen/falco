@@ -26,13 +26,36 @@ limitations under the License.
 */
 struct falco_source
 {
+	falco_source() = default;
+	falco_source(falco_source&&) = default;
+	falco_source& operator = (falco_source&&) = default;
+	falco_source(const falco_source& s):
+		name(s.name),
+		ruleset(s.ruleset),
+		ruleset_factory(s.ruleset_factory),
+		filter_factory(s.filter_factory),
+		formatter_factory(s.formatter_factory) { };
+	falco_source& operator = (const falco_source& s)
+	{
+		name = s.name;
+		ruleset = s.ruleset;
+		ruleset_factory = s.ruleset_factory;
+		filter_factory = s.filter_factory;
+		formatter_factory = s.formatter_factory;
+		return *this;
+	};
+
 	std::string name;
 	std::shared_ptr<filter_ruleset> ruleset;
 	std::shared_ptr<filter_ruleset_factory> ruleset_factory;
 	std::shared_ptr<gen_event_filter_factory> filter_factory;
 	std::shared_ptr<gen_event_formatter_factory> formatter_factory;
 
-	inline bool is_field_defined(std::string field) const
+	// Used by the filter_ruleset interface. Filled in when a rule
+	// matches an event.
+	mutable std::vector<falco_rule> m_rules;
+
+	inline bool is_field_defined(const std::string& field) const
 	{
 		auto *chk = filter_factory->new_filtercheck(field.c_str());
 		if (chk)

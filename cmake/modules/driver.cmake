@@ -20,18 +20,29 @@ if(DRIVER_SOURCE_DIR)
   set(DRIVER_VERSION "0.0.0-local")
   message(STATUS "Using local version for driver: '${DRIVER_SOURCE_DIR}'")
 else()
+  # DRIVER_REPO accepts a repository name (<org name>/<repo name>) alternative to the falcosecurity/libs repository.
+  # In case you want to test against a fork of falcosecurity/libs just pass the variable -
+  # ie., `cmake -DDRIVER_REPO=<your-gh-handle>/libs ..` 
+  if (NOT DRIVER_REPO)
+    set(DRIVER_REPO "falcosecurity/libs")
+  endif()
+
   # DRIVER_VERSION accepts a git reference (branch name, commit hash, or tag) to the falcosecurity/libs repository
   # which contains the driver source code under the `/driver` directory.
   # The chosen driver version must be compatible with the given FALCOSECURITY_LIBS_VERSION.
   # In case you want to test against another driver version (or branch, or commit) just pass the variable -
   # ie., `cmake -DDRIVER_VERSION=dev ..`
   if(NOT DRIVER_VERSION)
-    set(DRIVER_VERSION "6599e2efebce30a95f27739d655d53f0d5f686e4")
-    set(DRIVER_CHECKSUM "SHA256=7cd84fe8a41c25bba9cd7d5d86a87d2483658e367b885ddbd3037aa45404df04")
+    set(DRIVER_VERSION "6caaa3c85d7c783b29cd32832f2552a4bd6cd739")
+    set(DRIVER_CHECKSUM "SHA256=0e32682499355332561962174119520cd02c652a6b73040f17d3099eee7537ea")
   endif()
 
   # cd /path/to/build && cmake /path/to/source
-  execute_process(COMMAND "${CMAKE_COMMAND}" -DDRIVER_VERSION=${DRIVER_VERSION} -DDRIVER_CHECKSUM=${DRIVER_CHECKSUM}
+  execute_process(COMMAND "${CMAKE_COMMAND}"
+      -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+      -DDRIVER_REPO=${DRIVER_REPO}
+      -DDRIVER_VERSION=${DRIVER_VERSION}
+      -DDRIVER_CHECKSUM=${DRIVER_CHECKSUM}
     ${DRIVER_CMAKE_SOURCE_DIR} WORKING_DIRECTORY ${DRIVER_CMAKE_WORKING_DIR})
 
   # cmake --build .

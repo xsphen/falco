@@ -16,24 +16,16 @@ limitations under the License.
 
 #pragma once
 
-#include <map>
 #include <string>
 #include <vector>
 #include <yaml-cpp/yaml.h>
 #include <nlohmann/json.hpp>
-#include "falco_rule.h"
 #include "falco_source.h"
 #include "falco_load_result.h"
 #include "indexed_vector.h"
 
-
-/*!
-	\brief Ruleset loader of the falco engine
-*/
-class rule_loader
+namespace rule_loader
 {
-public:
-
 	class context
 	{
 	public:
@@ -72,8 +64,13 @@ public:
 		struct position
 		{
 			position() : pos(0), line(0), column(0) {};
-			position(const YAML::Mark& mark) : pos(mark.pos), line(mark.line), column(mark.column) {};
+			explicit position(const YAML::Mark& mark) : pos(mark.pos), line(mark.line), column(mark.column) {};
 			~position() = default;
+			position(position&&) = default;
+			position& operator = (position&&) = default;
+			position(const position&) = default;
+			position& operator = (const position&) = default;
+
 			int pos;
 			int line;
 			int column;
@@ -81,6 +78,18 @@ public:
 
 		struct location
 		{
+			location(): item_type(context::item_type::VALUE_FOR) {}
+			location(
+				const std::string& n,
+				const position& p,
+				context::item_type i,
+				const std::string& in):
+					name(n), pos(p), item_type(i), item_name(in) {}
+			location(location&&) = default;
+			location& operator = (location&&) = default;
+			location(const location&) = default;
+			location& operator = (const location&) = default;
+
 			// A name for the content this location refers
 			// to. Will generally be a filename, can also
 			// refer to a rule/macro condition when the
@@ -99,10 +108,13 @@ public:
 			std::string item_name;
 		};
 
-		context(const std::string& name);
+		explicit context(const std::string& name);
 		context(const YAML::Node& item,
 			item_type item_type,
-			const std::string item_name,
+			const std::string& item_name,
+			const context& parent);
+		context(
+			const YAML::Mark &mark,
 			const context& parent);
 
 		// Build a context from a condition expression +
@@ -112,11 +124,16 @@ public:
 		//     from the YAML node containing the condition expression.
 		//   - When compiling, the condition expression has expanded
 		//     macro and list references with their values.
-		context(const libsinsp::filter::parser::pos_info& pos,
+		context(const libsinsp::filter::ast::pos_info& pos,
 			const std::string& condition,
 			const context& parent);
 
 		virtual ~context() = default;
+
+		context(context&&) = default;
+		context& operator = (context&&) = default;
+		context(const context&) = default;
+		context& operator = (const context&) = default;
 
 		// Return the content name (generally filename) for
 		// this context
@@ -138,7 +155,7 @@ public:
 		void init(const std::string& name,
 			  const position& pos,
 			  const item_type item_type,
-			  const std::string item_name,
+			  const std::string& item_name,
 			  const context& parent);
 
 		// A chain of locations from the current item, its
@@ -153,6 +170,16 @@ public:
 
 	struct warning
 	{
+		warning(): wc(falco::load_result::warning_code::LOAD_UNKNOWN_SOURCE), ctx("no-filename-given") {}
+		warning(
+			falco::load_result::warning_code w,
+			const std::string& m,
+			const context& c): wc(w), msg(m), ctx(c) {}
+		warning(warning&&) = default;
+		warning& operator = (warning&&) = default;
+		warning(const warning&) = default;
+		warning& operator = (const warning&) = default;
+
 		falco::load_result::warning_code wc;
 		std::string msg;
 		context ctx;
@@ -160,6 +187,16 @@ public:
 
 	struct error
 	{
+		error(): ec(falco::load_result::error_code::LOAD_ERR_FILE_READ), ctx("no-filename-given") {}
+		error(
+			falco::load_result::error_code e,
+			const std::string& m,
+			const context& c): ec(e), msg(m), ctx(c) {}
+		error(error&&) = default;
+		error& operator = (error&&) = default;
+		error(const error&) = default;
+		error& operator = (const error&) = default;
+
 		falco::load_result::error_code ec;
 		std::string msg;
 		context ctx;
@@ -168,8 +205,13 @@ public:
 	class rule_load_exception : public std::exception
 	{
 	public:
-		rule_load_exception(falco::load_result::error_code ec, std::string msg, const context& ctx);
+		rule_load_exception(falco::load_result::error_code ec, const std::string& msg, const context& ctx);
 		virtual ~rule_load_exception();
+		rule_load_exception(rule_load_exception&&) = default;
+		rule_load_exception& operator = (rule_load_exception&&) = default;
+		rule_load_exception(const rule_load_exception&) = default;
+		rule_load_exception& operator = (const rule_load_exception&) = default;
+
 		const char* what();
 
 		falco::load_result::error_code ec;
@@ -187,6 +229,10 @@ public:
 	public:
 		result(const std::string &name);
 		virtual ~result() = default;
+		result(result&&) = default;
+		result& operator = (result&&) = default;
+		result(const result&) = default;
+		result& operator = (const result&) = default;
 
 		virtual bool successful() override;
 		virtual bool has_warnings() override;
@@ -224,11 +270,17 @@ public:
 		explicit configuration(
 			const std::string& cont,
 			const indexed_vector<falco_source>& srcs,
-			std::string name)
-				: content(cont), sources(srcs), name(name)
+			const std::string& name)
+				: content(cont), sources(srcs), name(name),
+				  default_ruleset_id(0), replace_output_container_info(false),
+				  min_priority(falco_common::PRIORITY_DEBUG)
 			{
 				res.reset(new result(name));
 			}
+		configuration(configuration&&) = default;
+		configuration& operator = (configuration&&) = default;
+		configuration(const configuration&) = delete;
+		configuration& operator = (const configuration&) = delete;
 
 		const std::string& content;
 		const indexed_vector<falco_source>& sources;
@@ -245,8 +297,13 @@ public:
 	*/
 	struct engine_version_info
 	{
+		engine_version_info() : ctx("no-filename-given"), version(0) { };
 		engine_version_info(context &ctx);
 		~engine_version_info() = default;
+		engine_version_info(engine_version_info&&) = default;
+		engine_version_info& operator = (engine_version_info&&) = default;
+		engine_version_info(const engine_version_info&) = default;
+		engine_version_info& operator = (const engine_version_info&) = default;
 
 		context ctx;
 		uint32_t version;
@@ -260,8 +317,12 @@ public:
 		struct requirement
 		{
 			requirement() = default;
-			requirement(const std::string n, const std::string v):
+			requirement(const std::string& n, const std::string& v):
 				name(n), version(v) { }
+			requirement(requirement&&) = default;
+			requirement& operator = (requirement&&) = default;
+			requirement(const requirement&) = default;
+			requirement& operator = (const requirement&) = default;
 
 			std::string name;
 			std::string version;
@@ -275,6 +336,10 @@ public:
 		plugin_version_info();
 		plugin_version_info(context &ctx);
 		~plugin_version_info() = default;
+		plugin_version_info(plugin_version_info&&) = default;
+		plugin_version_info& operator = (plugin_version_info&&) = default;
+		plugin_version_info(const plugin_version_info&) = default;
+		plugin_version_info& operator = (const plugin_version_info&) = default;
 
 		context ctx;
 		requirement_alternatives alternatives;
@@ -287,6 +352,10 @@ public:
 	{
 		list_info(context &ctx);
 		~list_info() = default;
+		list_info(list_info&&) = default;
+		list_info& operator = (list_info&&) = default;
+		list_info(const list_info&) = default;
+		list_info& operator = (const list_info&) = default;
 
 		context ctx;
 		bool used;
@@ -303,6 +372,10 @@ public:
 	{
 		macro_info(context &ctx);
 		~macro_info() = default;
+		macro_info(macro_info&&) = default;
+		macro_info& operator = (macro_info&&) = default;
+		macro_info(const macro_info&) = default;
+		macro_info& operator = (const macro_info&) = default;
 
 		context ctx;
 		context cond_ctx;
@@ -321,6 +394,10 @@ public:
 	{
 		rule_exception_info(context &ctx);
 		~rule_exception_info() = default;
+		rule_exception_info(rule_exception_info&&) = default;
+		rule_exception_info& operator = (rule_exception_info&&) = default;
+		rule_exception_info(const rule_exception_info&) = default;
+		rule_exception_info& operator = (const rule_exception_info&) = default;
 
 		/*!
 			\brief This is necessary due to the dynamic-typed nature of
@@ -329,6 +406,14 @@ public:
 			this easier to implement in C++, that is not non-dynamic-typed.
 		*/
 		struct entry {
+			entry(): is_list(false) {}
+			explicit entry(const std::string& i): is_list(false), item(i) {}
+			explicit entry(const std::vector<entry>& v): is_list(true), items(v) {}
+			entry(entry&&) = default;
+			entry& operator = (entry&&) = default;
+			entry(const entry&) = default;
+			entry& operator = (const entry&) = default;
+
 			bool is_list;
 			std::string item;
 			std::vector<entry> items;
@@ -354,12 +439,17 @@ public:
 	{
 		rule_info(context &ctx);
 		~rule_info() = default;
+		rule_info(rule_info&&) = default;
+		rule_info& operator = (rule_info&&) = default;
+		rule_info(const rule_info&) = default;
+		rule_info& operator = (const rule_info&) = default;
 
 		context ctx;
 		context cond_ctx;
 		context output_ctx;
 		size_t index;
 		size_t visibility;
+		bool unknown_source;
 		std::string name;
 		std::string cond;
 		std::string source;
@@ -372,67 +462,4 @@ public:
 		bool warn_evttypes;
 		bool skip_if_unknown_filter;
 	};
-
-	virtual ~rule_loader() = default;
-
-	/*!
-		\brief Erases all the internal state and definitions
-	*/
-	virtual void clear();
-
-	/*!
-		\brief Uses the internal state to compile a list of falco_rules
-	*/
-	virtual void compile(configuration& cfg, indexed_vector<falco_rule>& out) const;
-
-	/*!
-		\brief Returns the set of all required versions for each plugin according
-		to the internal definitions.
-	*/
-	virtual const std::vector<plugin_version_info::requirement_alternatives>& required_plugin_versions() const;
-
-	/*!
-		\brief Defines an info block. If a similar info block is found
-		in the internal state (e.g. another rule with same name), then
-		the previous definition gets overwritten
-	*/
-	virtual void define(configuration& cfg, engine_version_info& info);
-	virtual void define(configuration& cfg, plugin_version_info& info);
-	virtual void define(configuration& cfg, list_info& info);
-	virtual void define(configuration& cfg, macro_info& info);
-	virtual void define(configuration& cfg, rule_info& info);
-
-	/*!
-		\brief Appends an info block to an existing one. An exception
-		is thrown if no existing definition can be matched with the appended
-		one
-	*/
-	virtual void append(configuration& cfg, list_info& info);
-	virtual void append(configuration& cfg, macro_info& info);
-	virtual void append(configuration& cfg, rule_info& info);
-
-	/*!
-		\brief Updates the 'enabled' flag of an existing definition
-	*/
-	virtual void enable(configuration& cfg, rule_info& info);
-
-private:
-	void compile_list_infos(
-		configuration& cfg,
-		indexed_vector<list_info>& out) const;
-	void compile_macros_infos(
-		configuration& cfg,
-		indexed_vector<list_info>& lists,
-		indexed_vector<macro_info>& out) const;
-	void compile_rule_infos(
-		configuration& cfg,
-		indexed_vector<list_info>& lists,
-		indexed_vector<macro_info>& macros,
-		indexed_vector<falco_rule>& out) const;
-
-	uint32_t m_cur_index;
-	indexed_vector<rule_info> m_rule_infos;
-	indexed_vector<macro_info> m_macro_infos;
-	indexed_vector<list_info> m_list_infos;
-	std::vector<plugin_version_info::requirement_alternatives> m_required_plugin_versions;
 };

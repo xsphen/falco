@@ -24,7 +24,10 @@ limitations under the License.
 #include <iostream>
 #include <string>
 #include <thread>
-#include <nonstd/string_view.hpp>
+#include <unordered_set>
+#include <set>
+#include <vector>
+#include <string>
 
 #ifdef __GNUC__
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -40,6 +43,8 @@ namespace falco
 namespace utils
 {
 
+uint64_t parse_prometheus_interval(std::string interval_str);
+
 std::string wrap_text(const std::string& in, uint32_t indent, uint32_t linelen);
 
 void readfile(const std::string& filename, std::string& data);
@@ -49,7 +54,7 @@ uint32_t hardware_concurrency();
 namespace network
 {
 static const std::string UNIX_SCHEME("unix://");
-bool is_unix_scheme(nonstd::string_view url);
+bool is_unix_scheme(const std::string& url);
 } // namespace network
 } // namespace utils
 } // namespace falco

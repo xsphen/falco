@@ -15,33 +15,39 @@ configure_file(config_falco.h.in config_falco.h)
 
 set(
   FALCO_SOURCES
-  application.cpp
-  app_cmdline_options.cpp
-  app_actions/create_signal_handlers.cpp
-  app_actions/daemonize.cpp
-  app_actions/init_falco_engine.cpp
-  app_actions/init_inspectors.cpp
-  app_actions/init_clients.cpp
-  app_actions/init_outputs.cpp
-  app_actions/list_fields.cpp
-  app_actions/list_plugins.cpp
-  app_actions/load_config.cpp
-  app_actions/load_plugins.cpp
-  app_actions/load_rules_files.cpp
-  app_actions/open_inspector.cpp
-  app_actions/process_events.cpp
-  app_actions/print_generated_gvisor_config.cpp
-  app_actions/print_help.cpp
-  app_actions/print_ignored_events.cpp
-  app_actions/print_plugin_info.cpp
-  app_actions/print_support.cpp
-  app_actions/print_syscall_events.cpp
-  app_actions/print_version.cpp
-  app_actions/select_event_sources.cpp
-  app_actions/start_grpc_server.cpp
-  app_actions/start_webserver.cpp
-  app_actions/validate_rules_files.cpp
-  app_actions/create_requested_paths.cpp
+  app/app.cpp
+  app/options.cpp
+  app/restart_handler.cpp
+  app/actions/helpers_generic.cpp
+  app/actions/helpers_inspector.cpp
+  app/actions/configure_interesting_sets.cpp
+  app/actions/create_signal_handlers.cpp
+  app/actions/pidfile.cpp
+  app/actions/init_falco_engine.cpp
+  app/actions/init_inspectors.cpp
+  app/actions/init_clients.cpp
+  app/actions/init_outputs.cpp
+  app/actions/list_fields.cpp
+  app/actions/list_plugins.cpp
+  app/actions/load_config.cpp
+  app/actions/load_plugins.cpp
+  app/actions/load_rules_files.cpp
+  app/actions/process_events.cpp
+  app/actions/print_generated_gvisor_config.cpp
+  app/actions/print_help.cpp
+  app/actions/print_ignored_events.cpp
+  app/actions/print_plugin_info.cpp
+  app/actions/print_support.cpp
+  app/actions/print_syscall_events.cpp
+  app/actions/print_version.cpp
+  app/actions/print_page_size.cpp
+  app/actions/configure_syscall_buffer_size.cpp
+  app/actions/configure_syscall_buffer_num.cpp
+  app/actions/select_event_sources.cpp
+  app/actions/start_grpc_server.cpp
+  app/actions/start_webserver.cpp
+  app/actions/validate_rules_files.cpp
+  app/actions/create_requested_paths.cpp
   configuration.cpp
   logger.cpp
   falco_outputs.cpp
@@ -51,7 +57,7 @@ set(
   outputs_syslog.cpp
   event_drops.cpp
   stats_writer.cpp
-  falco.cpp
+  versions_info.cpp
 )
 
 set(
@@ -59,7 +65,6 @@ set(
   "${PROJECT_SOURCE_DIR}/userspace/engine"
   "${PROJECT_BINARY_DIR}/userspace/falco"
   "${PROJECT_BINARY_DIR}/driver/src"
-  "${STRING_VIEW_LITE_INCLUDE}"
   "${CXXOPTS_INCLUDE_DIR}"
   "${YAMLCPP_INCLUDE_DIR}"
   "${CMAKE_CURRENT_BINARY_DIR}"
@@ -70,8 +75,6 @@ list(APPEND FALCO_INCLUDE_DIRECTORIES "${FALCO_EXTRA_INCLUDE_DIRS}")
 
 set(
   FALCO_DEPENDENCIES
-  string-view-lite
-  b64
   cxxopts
 )
 
@@ -86,7 +89,7 @@ if(USE_BUNDLED_DEPS)
   list(APPEND FALCO_DEPENDENCIES yamlcpp)
 endif()
 
-if(NOT MINIMAL_BUILD)
+if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND NOT MINIMAL_BUILD)
   list(
     APPEND FALCO_SOURCES
     outputs_grpc.cpp
@@ -115,7 +118,7 @@ if(NOT MINIMAL_BUILD)
     "${CARES_INCLUDE}"
   )
 
-  if(USE_BUNDLED_GRPC)
+  if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND USE_BUNDLED_GRPC)
     list(APPEND FALCO_DEPENDENCIES grpc)
     list(APPEND FALCO_LIBRARIES "${GRPC_LIBRARIES}")
   endif()
@@ -134,36 +137,44 @@ if(NOT MINIMAL_BUILD)
   )
 endif()
 
-add_executable(
-  falco
+add_library(
+  falco_application STATIC
   ${FALCO_SOURCES}
 )
 
-add_dependencies(falco ${FALCO_DEPENDENCIES})
+if (EMSCRIPTEN)
+	target_compile_options(falco_application PRIVATE "-sDISABLE_EXCEPTION_CATCHING=0")
+endif()
+
+add_dependencies(falco_application ${FALCO_DEPENDENCIES})
 
 target_link_libraries(
-  falco
+  falco_application
   ${FALCO_LIBRARIES}
 )
 
 target_include_directories(
-  falco
+  falco_application
   PUBLIC
   ${FALCO_INCLUDE_DIRECTORIES}
 )
 
-if(NOT MINIMAL_BUILD)
-  add_custom_command(
-    TARGET falco
-    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/verify_engine_fields.sh ${CMAKE_SOURCE_DIR}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Comparing engine fields checksum in falco_engine.h to actual fields"
-  )
-else()
-  message(STATUS "Skipping engine fields checksum when building the minimal Falco.")
+add_executable(falco falco.cpp)
+add_dependencies(falco falco_application ${FALCO_DEPENDENCIES})
+target_link_libraries(falco falco_application ${FALCO_LIBRARIES})
+target_include_directories(falco PUBLIC ${FALCO_INCLUDE_DIRECTORIES})
+
+if (EMSCRIPTEN)
+  target_compile_options(falco PRIVATE "-sDISABLE_EXCEPTION_CATCHING=0")
+  target_link_options(falco PRIVATE "-sALLOW_MEMORY_GROWTH=1")
+  target_link_options(falco PRIVATE "-sDISABLE_EXCEPTION_CATCHING=0")
+  target_link_options(falco PRIVATE "-sMODULARIZE=1")
+  target_link_options(falco PRIVATE "-sEXPORT_ES6=1")
+  target_link_options(falco PRIVATE "-sEXPORTED_RUNTIME_METHODS=['FS', 'callMain']")
+  target_link_options(falco PRIVATE "-sEXPORTED_FUNCTIONS=['_main','_htons','_ntohs']")
 endif()
 
-if(NOT MINIMAL_BUILD)
+if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND NOT MINIMAL_BUILD)
   add_custom_command(
     OUTPUT
     ${CMAKE_CURRENT_BINARY_DIR}/version.grpc.pb.cc
@@ -202,4 +213,12 @@ if(MUSL_OPTIMIZED_BUILD AND CMAKE_BUILD_TYPE STREQUAL "release")
   )
 endif()
 
-install(TARGETS falco RUNTIME DESTINATION ${FALCO_BIN_DIR} COMPONENT "${FALCO_COMPONENT_NAME}")
+if (NOT EMSCRIPTEN)
+  install(TARGETS falco RUNTIME DESTINATION ${FALCO_BIN_DIR} COMPONENT "${FALCO_COMPONENT_NAME}")
+else()
+  install(FILES
+    "$<TARGET_FILE_DIR:falco>/falco.js"
+    "$<TARGET_FILE_DIR:falco>/falco.wasm"
+    DESTINATION ${FALCO_BIN_DIR}
+    COMPONENT "${FALCO_COMPONENT_NAME}")
+endif()

@@ -18,19 +18,22 @@ set(FALCO_ENGINE_SOURCE_FILES
     json_evt.cpp
     evttype_index_ruleset.cpp
     formats.cpp
+    filter_details_resolver.cpp
     filter_macro_resolver.cpp
-    filter_evttype_resolver.cpp
     filter_warning_resolver.cpp
+    stats_manager.cpp
     rule_loader.cpp
-    rule_reader.cpp
-    stats_manager.cpp)
+    rule_loader_reader.cpp
+    rule_loader_collector.cpp
+    rule_loader_compiler.cpp)
 
 add_library(falco_engine STATIC ${FALCO_ENGINE_SOURCE_FILES})
-add_dependencies(falco_engine njson string-view-lite)
 
-if(USE_BUNDLED_DEPS)
-  add_dependencies(falco_engine yamlcpp)
+if (EMSCRIPTEN)
+	target_compile_options(falco_engine PRIVATE "-sDISABLE_EXCEPTION_CATCHING=0")
 endif()
+
+add_dependencies(falco_engine yamlcpp njson)
 
 if(MINIMAL_BUILD)
   target_include_directories(
@@ -38,7 +41,6 @@ if(MINIMAL_BUILD)
     PUBLIC
       "${NJSON_INCLUDE}"
       "${TBB_INCLUDE_DIR}"
-      "${STRING_VIEW_LITE_INCLUDE}"
       "${LIBSCAP_INCLUDE_DIRS}"
       "${LIBSINSP_INCLUDE_DIRS}"
       "${YAMLCPP_INCLUDE_DIR}"
@@ -49,7 +51,6 @@ else()
     PUBLIC
       "${NJSON_INCLUDE}"
       "${TBB_INCLUDE_DIR}"
-      "${STRING_VIEW_LITE_INCLUDE}"
       "${LIBSCAP_INCLUDE_DIRS}"
       "${LIBSINSP_INCLUDE_DIRS}"
       "${YAMLCPP_INCLUDE_DIR}"

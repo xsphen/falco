@@ -21,6 +21,7 @@ limitations under the License.
 #include <filter.h>
 #include <event.h>
 #include <gen_filter.h>
+#include <events/sinsp_events.h>
 
 /*!
 	\brief Manages a set of rulesets. A ruleset is a set of
@@ -32,16 +33,20 @@ public:
 	virtual ~filter_ruleset() = default;
 
 	/*!
-		\brief Adds a rule and its filtering condition inside the manager.
-		An exception is thrown is case of error. This method only adds the rule
-		inside the internal collection, but does not enable it for any ruleset.
-		The rule must be enabled for one or more rulesets with the enable() or
-		enable_tags() methods.
+		\brief Adds a rule and its filtering filter + condition inside the manager.
+	        This method only adds the rule inside the internal collection,
+		but does not enable it for any ruleset.	The rule must be enabled
+		for one or more rulesets with the enable() or enable_tags() methods.
+		The ast representation of the rule's condition is provided to allow
+		the filter_ruleset object to parse the ast to obtain event types
+		or do other analysis/indexing of the condition.
 		\param rule The rule to be added
+		\param the filter representing the rule's filtering condition.
 		\param condition The AST representing the rule's filtering condition
 	*/
 	virtual void add(
 		const falco_rule& rule,
+		std::shared_ptr<gen_event_filter> filter,
 		std::shared_ptr<libsinsp::filter::ast::expr> condition) = 0;
 
 	/*!
@@ -60,13 +65,26 @@ public:
 		\brief Processes an event and tries to find a match in a given ruleset.
 		\return true if a match is found, false otherwise
 		\param evt The event to be processed
-		\param match If true is returned, this is filled-out with the rule
+		\param match If true is returned, this is filled-out with the first rule
 		that matched the event
 		\param ruleset_id The id of the ruleset to be used
 	*/
 	virtual bool run(
 		gen_event *evt,
 		falco_rule& match,
+		uint16_t ruleset_id) = 0;
+	
+	/*!
+		\brief Processes an event and tries to find a match in a given ruleset.
+		\return true if a match is found, false otherwise
+		\param evt The event to be processed
+		\param matches If true is returned, this is filled-out with all the rules
+		that matched the event
+		\param ruleset_id The id of the ruleset to be used
+	*/
+	virtual bool run(
+		gen_event *evt,
+		std::vector<falco_rule>& matches,
 		uint16_t ruleset_id) = 0;
 
 	/*!
@@ -79,9 +97,28 @@ public:
 		\brief Returns the union of the evttypes of all the rules enabled
 		in a given ruleset
 		\param ruleset_id The id of the ruleset to be used
+		\deprecated Must use the new typing-improved `enabled_event_codes`
+		and `enabled_sc_codes` instead
+		\note todo(jasondellaluce): remove this in future refactors
 	*/
 	virtual void enabled_evttypes(
 		std::set<uint16_t> &evttypes,
+		uint16_t ruleset) = 0;
+	
+	/*!
+		\brief Returns the all the ppm_sc_codes matching the rules
+		enabled in a given ruleset.
+		\param ruleset_id The id of the ruleset to be used
+	*/
+	virtual libsinsp::events::set<ppm_sc_code> enabled_sc_codes(
+		uint16_t ruleset) = 0;
+	
+	/*!
+		\brief Returns the all the ppm_event_codes matching the rules
+		enabled in a given ruleset.
+		\param ruleset_id The id of the ruleset to be used
+	*/
+	virtual libsinsp::events::set<ppm_event_code> enabled_event_codes(
 		uint16_t ruleset) = 0;
 
 	/*!
@@ -151,5 +188,7 @@ public:
 class filter_ruleset_factory
 {
 public:
+	virtual ~filter_ruleset_factory() = default;
+
 	virtual std::shared_ptr<filter_ruleset> new_ruleset() = 0;
 };

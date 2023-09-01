@@ -16,15 +16,24 @@ limitations under the License.
 #pragma once
 
 #define CPPHTTPLIB_OPENSSL_SUPPORT
+#define CPPHTTPLIB_ZLIB_SUPPORT
 #include <httplib.h>
 #include <thread>
+#include <memory>
+#include <sinsp.h>
 #include "configuration.h"
 
 class falco_webserver
 {
 public:
+	falco_webserver() = default;
 	virtual ~falco_webserver();
+	falco_webserver(falco_webserver&&) = default;
+	falco_webserver& operator = (falco_webserver&&) = default;
+	falco_webserver(const falco_webserver&) = delete;
+	falco_webserver& operator = (const falco_webserver&) = delete;
 	virtual void start(
+		const std::shared_ptr<sinsp>& inspector,
 		uint32_t threadiness,
 		uint32_t listen_port,
 		std::string& healthz_endpoint,

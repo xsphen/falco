@@ -22,6 +22,7 @@ limitations under the License.
 
 #pragma once
 
+#include <atomic>
 #include <string>
 #include <memory>
 #include <set>
@@ -31,10 +32,12 @@ limitations under the License.
 #include "gen_filter.h"
 #include "filter_ruleset.h"
 #include "rule_loader.h"
+#include "rule_loader_collector.h"
 #include "stats_manager.h"
 #include "falco_common.h"
 #include "falco_source.h"
 #include "falco_load_result.h"
+#include "filter_details_resolver.h"
 
 //
 // This class acts as the primary interface between a program and the
@@ -121,7 +124,7 @@ public:
 	// Print details on the given rule. If rule is NULL, print
 	// details on all rules.
 	//
-	void describe_rule(std::string *rule) const;
+	void describe_rule(std::string *rule, bool json) const;
 
 	//
 	// Print statistics on how many events matched each rule.
@@ -145,10 +148,10 @@ public:
 	// of all output expressions. You can also choose to replace
 	// %container.info with the extra information or add it to the
 	// end of the expression. This is used in open source falco to
-	// add k8s/mesos/container information to outputs when
+	// add k8s/container information to outputs when
 	// available.
 	//
-	void set_extra(string &extra, bool replace_container_info);
+	void set_extra(std::string &extra, bool replace_container_info);
 
 	// Represents the result of matching an event against a set of
 	// rules.
@@ -171,7 +174,7 @@ public:
 	// configured the engine. In particular, invoking this with a source_idx
 	// not previosly-returned by a call to add_source() would cause a
 	// falco_exception to be thrown.
-	// 
+	//
 	// This method is thread-safe only with the assumption that every invoker
 	// uses a different source_idx. Moreover, each invoker must not switch
 	// source_idx in subsequent invocations of this method.
@@ -186,14 +189,16 @@ public:
 	// event source is not thread-safe of its own, so invoking this method
 	// concurrently with the same source_idx would inherently cause data races
 	// and lead to undefined behavior.
-	std::unique_ptr<rule_result> process_event(std::size_t source_idx, gen_event *ev, uint16_t ruleset_id);
+	std::unique_ptr<std::vector<rule_result>> process_event(std::size_t source_idx,
+		gen_event *ev, uint16_t ruleset_id, falco_common::rule_matching strategy);
 
 	//
 	// Wrapper assuming the default ruleset.
 	//
 	// This inherits the same thread-safety guarantees.
 	//
-	std::unique_ptr<rule_result> process_event(std::size_t source_idx, gen_event *ev);
+	std::unique_ptr<std::vector<rule_result>> process_event(std::size_t source_idx,
+		gen_event *ev, falco_common::rule_matching strategy);
 
 	//
 	// Configure the engine to support events with the provided
@@ -220,9 +225,28 @@ public:
 	//
 	// Given an event source and ruleset, fill in a bitset
 	// containing the event types for which this ruleset can run.
+	// note(jasondellaluce): this is deprecated, must use the new
+	// typing-improved `enabled_event_codes` and `enabled_sc_codes` instead
+	// todo(jasondellaluce): remove this in future code refactors
 	//
 	void evttypes_for_ruleset(std::string &source,
 				  std::set<uint16_t> &evttypes,
+				  const std::string &ruleset = s_default_ruleset);
+
+	//
+	// Given an event source and ruleset, return the set of ppm_sc_codes
+	// for which this ruleset can run and match events.
+	//
+	libsinsp::events::set<ppm_sc_code> sc_codes_for_ruleset(
+				  const std::string &source,
+				  const std::string &ruleset = s_default_ruleset);
+	
+	//
+	// Given an event source and ruleset, return the set of ppm_event_codes
+	// for which this ruleset can run and match events.
+	//
+	libsinsp::events::set<ppm_event_code> event_codes_for_ruleset(
+				  const std::string &source,
 				  const std::string &ruleset = s_default_ruleset);
 
 	//
@@ -264,6 +288,12 @@ private:
 	const falco_source* find_source(std::size_t index) const;
 	const falco_source* find_source(const std::string& name) const;
 
+	// To allow the engine to be extremely fast for syscalls (can
+	// be > 1M events/sec), we save the syscall source/source_idx
+	// separately and check it explicitly in process_event()
+	const falco_source* m_syscall_source;
+	std::atomic<size_t> m_syscall_source_idx;
+
 	//
 	// Determine whether the given event should be matched at all
 	// against the set of rules, given the current sampling
@@ -271,12 +301,26 @@ private:
 	//
 	inline bool should_drop_evt() const;
 
-	rule_loader m_rule_loader;
+	// Retrieve json details from rules, macros, lists
+	void get_json_details(const falco_rule& r,
+					const rule_loader::rule_info& ri,
+					sinsp* insp,
+					Json::Value& rule) const;
+	void get_json_details(const rule_loader::macro_info& m,
+					Json::Value& macro) const;
+	void get_json_details(const rule_loader::list_info& l,
+					Json::Value& list) const;
+	void get_json_details(libsinsp::filter::ast::expr* ast,
+					Json::Value& output) const;
+	void get_json_evt_types(libsinsp::filter::ast::expr* ast,
+					Json::Value& output) const;
+
+	rule_loader::collector m_rule_collector;
 	indexed_vector<falco_rule> m_rules;
 	stats_manager m_rule_stats_manager;
 
 	uint16_t m_next_ruleset_id;
-	std::map<string, uint16_t> m_known_rulesets;
+	std::map<std::string, uint16_t> m_known_rulesets;
 	falco_common::priority_type m_min_priority;
 
 	//
